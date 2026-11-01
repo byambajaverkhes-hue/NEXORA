@@ -1,0 +1,79 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function isOwner() {
+      return signedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "owner";
+    }
+    function isAdmin() {
+      return signedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ["owner", "admin"];
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn() && request.auth.uid == userId;
+      allow create: if signedIn() && request.auth.uid == userId;
+      allow update: if signedIn() && request.auth.uid == userId
+        && !("role" in request.resource.data.diff(resource.data).affectedKeys());
+      allow delete: if isOwner();
+    }
+
+    match /teams/{teamId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.captainId == request.auth.uid
+        && request.resource.data.playerIds.size() <= 5;
+      allow update: if signedIn() &&
+        (resource.data.captainId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    match /tournaments/{tournamentId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /registrations/{registrationId} {
+      allow create: if signedIn()
+        && request.resource.data.captainId == request.auth.uid;
+      // Private game IDs: only the submitting user and authorized staff can read.
+      allow read: if signedIn() &&
+        (resource.data.captainId == request.auth.uid || isAdmin());
+      allow update: if isAdmin() ||
+        (signedIn() && resource.data.captainId == request.auth.uid);
+      allow delete: if isAdmin();
+    }
+
+    match /matches/{matchId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /groups/{groupId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.ownerId == request.auth.uid;
+      allow update, delete: if signedIn() &&
+        (resource.data.ownerId == request.auth.uid || isAdmin());
+    }
+
+    match /messages/{messageId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.senderId == request.auth.uid;
+      allow update, delete: if isAdmin() ||
+        (signedIn() && resource.data.senderId == request.auth.uid);
+    }
+
+    match /reports/{reportId} {
+      allow create: if signedIn() && request.resource.data.reporterId == request.auth.uid;
+      allow read, update: if isAdmin();
+      allow delete: if isOwner();
+    }
+
+    match /audit_logs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin();
+      allow update, delete: if isOwner();
+    }
+  }
+}
